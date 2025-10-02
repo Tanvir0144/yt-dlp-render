@@ -1,16 +1,18 @@
 @echo off
 cd /d D:\yt-dlp-render
 
-:: সব ফাইল add করো
+echo ============================
+echo Adding all changes...
 git add .
 
-:: কমিট করো
-git commit -m "fix: update requirements and runtime for Render"
+echo ============================
+echo Committing...
+git commit -m "update: main.py with COOKIES_B64 support"
 
-:: GitHub এ push করো
+echo ============================
+echo Pushing to GitHub...
 git push origin main
 
-echo ==============================
-echo Push complete! Now redeploy on Render.
-echo ==============================
+echo ============================
+echo Push complete! Now go to Render and Deploy latest commit.
 pause
