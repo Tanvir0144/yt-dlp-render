@@ -1,19 +1,23 @@
 from fastapi import FastAPI
 import yt_dlp
-import os
+import os, base64
 
 app = FastAPI()
 
 def get_ydl_opts(extra_opts=None):
     """Common YDL options with cookies support"""
     opts = {"quiet": True}
-    cookies = os.getenv("COOKIES")
 
-    # যদি Render environment এ cookies থাকে → ফাইলে লিখে দাও
-    if cookies:
-        with open("cookies.txt", "w", encoding="utf-8") as f:
-            f.write(cookies)
-        opts["cookiefile"] = "cookies.txt"
+    # Render environment এ COOKIES_B64 থাকলে ডিকোড করে cookies.txt বানাও
+    cookies_b64 = os.getenv("COOKIES_B64")
+    if cookies_b64:
+        try:
+            cookies_data = base64.b64decode(cookies_b64).decode("utf-8")
+            with open("cookies.txt", "w", encoding="utf-8") as f:
+                f.write(cookies_data)
+            opts["cookiefile"] = "cookies.txt"
+        except Exception as e:
+            print("Cookie decode error:", e)
 
     if extra_opts:
         opts.update(extra_opts)
