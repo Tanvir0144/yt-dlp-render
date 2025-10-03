@@ -25,8 +25,9 @@ def get_ydl_opts(extra_opts=None):
 
 @app.get("/")
 def home():
-    return {"message": "YT-DLP Super API Running on Render with Cookies!"}
+    return {"message": "✅ YT-DLP Super API Running on Render with Cookies!"}
 
+# ------------------ DOWNLOAD ------------------
 @app.get("/download")
 def download(url: str):
     ydl_opts = get_ydl_opts({"skip_download": True})
@@ -42,22 +43,26 @@ def download(url: str):
             "url": info.get("webpage_url"),
         }
 
+# ------------------ SEARCH ------------------
 @app.get("/search")
 def search(q: str, limit: int = 5):
     url = f"ytsearch{limit}:{q}"
     ydl_opts = get_ydl_opts({"extract_flat": True})
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        return {"results": info["entries"]}
+        return {"results": info.get("entries", [])}
 
+# ------------------ TRENDING (FIXED) ------------------
 @app.get("/trending")
-def trending(region: str = "US"):
-    url = f"https://www.youtube.com/feed/trending?gl={region}"
+def trending(region: str = "BD", limit: int = 10):
+    # feed/trending এর বদলে ytsearch ব্যবহার করলাম
+    query = f"ytsearch{limit}:trending in {region}"
     ydl_opts = get_ydl_opts({"extract_flat": True})
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        return {"trending": info["entries"][:10]}
+        info = ydl.extract_info(query, download=False)
+        return {"trending": info.get("entries", [])}
 
+# ------------------ PLAY STREAM ------------------
 @app.get("/play")
 def play(url: str):
     ydl_opts = get_ydl_opts({"format": "best"})
@@ -65,5 +70,5 @@ def play(url: str):
         info = ydl.extract_info(url, download=False)
         return {
             "title": info.get("title"),
-            "stream_url": info["url"]
+            "stream_url": info.get("url")
         }
