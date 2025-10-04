@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Query, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 import yt_dlp
 import os, base64, tempfile
 
-app = FastAPI(title="YT-DLP Super API", version="2.0")
+app = FastAPI(title="YT-DLP Ultimate API", version="2.1")
 
 # ---------------------------------------------------
 # Common yt-dlp options (with cookie decode support)
@@ -26,11 +26,11 @@ def get_ydl_opts(extra_opts=None):
 
 @app.get("/")
 def home():
-    return {"message": "✅ YT-DLP Ultimate API is Running!", "version": "2.0"}
+    return {"message": "✅ YT-DLP Ultimate API is Running!", "version": "2.1"}
 
 
 # ---------------------------------------------------
-# VIDEO INFO / METADATA
+# VIDEO INFO / METADATA (Optimized)
 # ---------------------------------------------------
 @app.get("/info")
 def info(url: str):
@@ -38,35 +38,54 @@ def info(url: str):
         ydl_opts = get_ydl_opts({"skip_download": True})
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+
+        # ✅ thumbnails fallback
+        thumbnail = info.get("thumbnail")
+        if not thumbnail and info.get("thumbnails"):
+            try:
+                thumbnail = info["thumbnails"][-1]["url"]
+            except Exception:
+                thumbnail = "https://i.imgur.com/404.png"
+        if not thumbnail:
+            thumbnail = "https://i.imgur.com/404.png"
+
+        # ✅ formats cleanup
+        formats = []
+        for f in info.get("formats", []):
+            if not f.get("url"):
+                continue
+            formats.append({
+                "format_id": f.get("format_id"),
+                "ext": f.get("ext"),
+                "filesize": f.get("filesize"),
+                "quality": f.get("format_note"),
+                "acodec": f.get("acodec"),
+                "vcodec": f.get("vcodec"),
+                "url": f.get("url"),
+            })
+
         return {
             "id": info.get("id"),
             "title": info.get("title"),
             "uploader": info.get("uploader"),
+            "channel": info.get("channel") or info.get("uploader"),
             "duration": info.get("duration"),
             "view_count": info.get("view_count"),
-            "thumbnail": info.get("thumbnail"),
-            "formats": [
-                {
-                    "format_id": f.get("format_id"),
-                    "ext": f.get("ext"),
-                    "filesize": f.get("filesize"),
-                    "quality": f.get("format_note"),
-                    "acodec": f.get("acodec"),
-                    "vcodec": f.get("vcodec"),
-                    "url": f.get("url"),
-                }
-                for f in info.get("formats", []) if f.get("url")
-            ],
+            "thumbnail": thumbnail,
+            "formats": formats[:10],  # শুধু প্রথম ১০টা রাখলাম
         }
+
+    except yt_dlp.utils.DownloadError as e:
+        raise HTTPException(status_code=404, detail=f"Invalid or unavailable video: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 
 # ---------------------------------------------------
 # SEARCH (YouTube only)
 # ---------------------------------------------------
 @app.get("/search")
-def search(q: str = Query(..., description="Search query"), limit: int = 5):
+def search(q: str = Query(..., description="Search query"), limit: int = 10):
     query = f"ytsearch{limit}:{q}"
     ydl_opts = get_ydl_opts({"extract_flat": True})
     try:
@@ -81,7 +100,7 @@ def search(q: str = Query(..., description="Search query"), limit: int = 5):
 # TRENDING (YouTube regional)
 # ---------------------------------------------------
 @app.get("/trending")
-def trending(region: str = "BD", limit: int = 10):
+def trending(region: str = "BD", limit: int = 15):
     query = f"ytsearch{limit}:trending in {region}"
     ydl_opts = get_ydl_opts({"extract_flat": True})
     try:
