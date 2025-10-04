@@ -1,15 +1,33 @@
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import FileResponse
 import yt_dlp
-import os, base64, tempfile
+import os, base64, tempfile, time
 
-app = FastAPI(title="YT-DLP Ultimate API", version="2.1")
+app = FastAPI(title="YT-DLP Ultra Fast API", version="3.0")
 
 # ---------------------------------------------------
-# Common yt-dlp options (with cookie decode support)
+# Global Config
+# ---------------------------------------------------
+CACHE_LIMIT = 50         # সর্বোচ্চ ৫০টা ভিডিও cache থাকবে
+CACHE_TTL = 300          # ৫ মিনিট পর্যন্ত cache valid (in seconds)
+stream_cache = {}        # {url: {"data": {...}, "time": timestamp}}
+
+# ---------------------------------------------------
+# yt-dlp options (optimized for Render)
 # ---------------------------------------------------
 def get_ydl_opts(extra_opts=None):
-    opts = {"quiet": True, "noplaylist": True, "nocheckcertificate": True}
+    opts = {
+        "quiet": True,
+        "noplaylist": True,
+        "nocheckcertificate": True,
+        "geo_bypass": True,
+        "cachedir": False,
+        "retries": 3,
+        "ignoreerrors": True,
+        "source_address": "0.0.0.0",
+        "extractor_retries": 2,
+    }
+    # ✅ Cookie decode (optional)
     cookies_b64 = os.getenv("COOKIES_B64")
     if cookies_b64:
         try:
@@ -18,19 +36,43 @@ def get_ydl_opts(extra_opts=None):
                 f.write(cookies_data)
             opts["cookiefile"] = "cookies.txt"
         except Exception as e:
-            print("Cookie decode error:", e)
+            print("⚠️ Cookie decode error:", e)
     if extra_opts:
         opts.update(extra_opts)
     return opts
 
 
-@app.get("/")
-def home():
-    return {"message": "✅ YT-DLP Ultimate API is Running!", "version": "2.1"}
+# ---------------------------------------------------
+# Cache Management System
+# ---------------------------------------------------
+def cleanup_cache():
+    """Auto remove old/expired cache items"""
+    now = time.time()
+    expired = [url for url, v in stream_cache.items() if now - v["time"] > CACHE_TTL]
+    for url in expired:
+        stream_cache.pop(url, None)
+
+    # যদি ৫০টার বেশি cache হয়, পুরনো গুলো ডিলিট করে দাও
+    if len(stream_cache) > CACHE_LIMIT:
+        sorted_items = sorted(stream_cache.items(), key=lambda x: x[1]["time"])
+        for url, _ in sorted_items[:len(stream_cache) - CACHE_LIMIT]:
+            stream_cache.pop(url, None)
 
 
 # ---------------------------------------------------
-# VIDEO INFO / METADATA (Optimized)
+# Root Route
+# ---------------------------------------------------
+@app.get("/")
+def home():
+    return {
+        "message": "✅ YT-DLP Ultra Fast API is Running Smoothly!",
+        "cache_size": len(stream_cache),
+        "version": "3.0"
+    }
+
+
+# ---------------------------------------------------
+# VIDEO INFO
 # ---------------------------------------------------
 @app.get("/info")
 def info(url: str):
@@ -39,7 +81,7 @@ def info(url: str):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        # ✅ thumbnails fallback
+        # Thumbnail fallback
         thumbnail = info.get("thumbnail")
         if not thumbnail and info.get("thumbnails"):
             try:
@@ -49,12 +91,8 @@ def info(url: str):
         if not thumbnail:
             thumbnail = "https://i.imgur.com/404.png"
 
-        # ✅ formats cleanup
-        formats = []
-        for f in info.get("formats", []):
-            if not f.get("url"):
-                continue
-            formats.append({
+        formats = [
+            {
                 "format_id": f.get("format_id"),
                 "ext": f.get("ext"),
                 "filesize": f.get("filesize"),
@@ -62,33 +100,32 @@ def info(url: str):
                 "acodec": f.get("acodec"),
                 "vcodec": f.get("vcodec"),
                 "url": f.get("url"),
-            })
+            }
+            for f in info.get("formats", []) if f.get("url")
+        ]
 
         return {
             "id": info.get("id"),
             "title": info.get("title"),
-            "uploader": info.get("uploader"),
             "channel": info.get("channel") or info.get("uploader"),
             "duration": info.get("duration"),
-            "view_count": info.get("view_count"),
+            "views": info.get("view_count"),
             "thumbnail": thumbnail,
-            "formats": formats[:10],  # শুধু প্রথম ১০টা রাখলাম
+            "formats": formats[:10],
         }
 
-    except yt_dlp.utils.DownloadError as e:
-        raise HTTPException(status_code=404, detail=f"Invalid or unavailable video: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
 
 # ---------------------------------------------------
-# SEARCH (YouTube only)
+# SEARCH
 # ---------------------------------------------------
 @app.get("/search")
 def search(q: str = Query(..., description="Search query"), limit: int = 10):
     query = f"ytsearch{limit}:{q}"
-    ydl_opts = get_ydl_opts({"extract_flat": True})
     try:
+        ydl_opts = get_ydl_opts({"extract_flat": True})
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
         return {"results": info.get("entries", [])}
@@ -97,13 +134,13 @@ def search(q: str = Query(..., description="Search query"), limit: int = 10):
 
 
 # ---------------------------------------------------
-# TRENDING (YouTube regional)
+# TRENDING
 # ---------------------------------------------------
 @app.get("/trending")
 def trending(region: str = "BD", limit: int = 15):
     query = f"ytsearch{limit}:trending in {region}"
-    ydl_opts = get_ydl_opts({"extract_flat": True})
     try:
+        ydl_opts = get_ydl_opts({"extract_flat": True})
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
         return {"region": region, "trending": info.get("entries", [])}
@@ -112,27 +149,22 @@ def trending(region: str = "BD", limit: int = 15):
 
 
 # ---------------------------------------------------
-# DOWNLOAD VIDEO / AUDIO (returns real file)
+# DOWNLOAD (MP3 / MP4)
 # ---------------------------------------------------
 @app.get("/download")
 def download(url: str, type: str = "video"):
     tmp_dir = tempfile.gettempdir()
     try:
+        ydl_opts = get_ydl_opts({
+            "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
+            "format": "bestaudio/best" if type == "audio" else "best",
+        })
         if type == "audio":
-            ydl_opts = get_ydl_opts({
-                "format": "bestaudio/best",
-                "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }],
-            })
-        else:
-            ydl_opts = get_ydl_opts({
-                "format": "best",
-                "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
-            })
+            ydl_opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }]
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -140,22 +172,27 @@ def download(url: str, type: str = "video"):
             if type == "audio":
                 filename = os.path.splitext(filename)[0] + ".mp3"
 
-        if not os.path.exists(filename):
-            raise FileNotFoundError("Download failed.")
         return FileResponse(
             filename,
             media_type="application/octet-stream",
             filename=os.path.basename(filename),
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Download failed: {e}")
 
 
 # ---------------------------------------------------
-# STREAM (returns playable direct URL)
+# STREAM (Auto cache + cleanup)
 # ---------------------------------------------------
 @app.get("/stream")
 def stream(url: str, quality: str = "best"):
+    now = time.time()
+    cleanup_cache()
+
+    # Cached URL reuse
+    if url in stream_cache and now - stream_cache[url]["time"] < CACHE_TTL:
+        return stream_cache[url]["data"]
+
     try:
         ydl_opts = get_ydl_opts({"format": quality})
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -163,14 +200,22 @@ def stream(url: str, quality: str = "best"):
         stream_url = info.get("url")
         if not stream_url:
             raise Exception("Stream URL not found.")
-        return {"title": info.get("title"), "stream_url": stream_url}
+
+        data = {"title": info.get("title"), "stream_url": stream_url}
+        stream_cache[url] = {"time": now, "data": data}
+        return data
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Stream error: {e}")
 
 
 # ---------------------------------------------------
-# HEALTH CHECK (for Render + UptimeRobot)
+# HEALTH
 # ---------------------------------------------------
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health(request: Request):
-    return {"status": "ok"}
+    cleanup_cache()
+    return {
+        "status": "ok",
+        "cache_size": len(stream_cache),
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
