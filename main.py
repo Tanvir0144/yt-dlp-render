@@ -1,7 +1,7 @@
-from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 import yt_dlp
-import os, base64, tempfile, io
+import os, base64, tempfile
 
 app = FastAPI(title="YT-DLP Super API", version="2.0")
 
@@ -93,7 +93,7 @@ def trending(region: str = "BD", limit: int = 10):
 
 
 # ---------------------------------------------------
-# DOWNLOAD VIDEO (returns real file)
+# DOWNLOAD VIDEO / AUDIO (returns real file)
 # ---------------------------------------------------
 @app.get("/download")
 def download(url: str, type: str = "video"):
@@ -137,9 +137,6 @@ def download(url: str, type: str = "video"):
 # ---------------------------------------------------
 @app.get("/stream")
 def stream(url: str, quality: str = "best"):
-    """
-    Returns direct stream URL for player embedding (without full download)
-    """
     try:
         ydl_opts = get_ydl_opts({"format": quality})
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -153,8 +150,8 @@ def stream(url: str, quality: str = "best"):
 
 
 # ---------------------------------------------------
-# HEALTH CHECK
+# HEALTH CHECK (for Render + UptimeRobot)
 # ---------------------------------------------------
-@app.get("/health")
-def health():
+@app.api_route("/health", methods=["GET", "HEAD"])
+def health(request: Request):
     return {"status": "ok"}
